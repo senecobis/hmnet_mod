@@ -42,6 +42,7 @@ from torch_scatter import scatter
 from ..init import init_transformer, load_state_dict_flexible
 from ..blocks import BlockBase
 from ..layers import ConvBlock, Linear
+from latent_VQ_VAE import Quantizer2D, Quantizer1D
 
 from torch import Tensor
 from typing import Tuple, List, Optional, Dict
@@ -1357,3 +1358,98 @@ def scatter_add(values: Tensor, indices: Tensor, dim: int, dim_size: int, use_to
         output.scatter_add_(dim, indices, values)
         return output
 
+# === VQ-Position Embedding for 1D (timestamps, polarity, etc.) ===
+class VQPositionEmbedding1D(PositionEmbedding1D):
+    def __init__(
+        self,
+        x_size: int,
+        embed_dim: int,
+        num_embeddings: int,
+        max_time: float,
+        hidden_dim: int = 64,
+        commitment_cost: float = 0.25,
+        dynamic: bool = False,   # force quantizer for dynamic mode
+        **kwargs
+    ) -> None:
+        super().__init__(x_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
+
+        if dynamic:
+            self.vq_encoder = Quantizer1D(
+                num_embeddings=num_embeddings,
+                embedding_dim=embed_dim,
+                max_time=max_time,
+                hidden_dim=hidden_dim,
+                commitment_cost=commitment_cost,
+            )
+            self.embed = nn.Identity()  # bypass original
+            self.has_table = False  # force quantizer
+        else:
+            # === static embedding table ===
+            self.vq_encoder = None
+            self.embed = nn.Identity()
+            self.position_embedding_table = nn.Parameter(torch.zeros(x_size, embed_dim))
+            trunc_normal_(self.position_embedding_table, std=.02)
+            self.has_table = True
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        if self.has_table:
+            embedding = self.position_embedding_table[x.long()]
+        else:
+            data = x.view(-1,1).float()
+            if self.shift_normalize:
+                data = data - self.x_size * 0.5
+            if self.scale_normalize:
+                data = data / self.x_size
+            if self.log_scale:
+                data = self._to_log_scale(data)
+            embedding, idx, loss = self.vq_encoder(data)
+        return embedding
+
+
+# === VQ-Position Embedding for 2D (coordinates) ===
+class VQPositionEmbedding2D(PositionEmbedding2D):
+    def __init__(
+        self,
+        x_size: int,
+        y_size: int,
+        embed_dim: int,
+        num_embeddings: int,
+        hidden_dim: int = 64,
+        commitment_cost: float = 0.25,
+        dynamic: bool = False,
+        **kwargs
+    ) -> None:
+        super().__init__(x_size, y_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
+
+        if dynamic:
+            self.vq_encoder = Quantizer2D(
+                num_embeddings=num_embeddings,
+                embedding_dim=embed_dim,
+                img_size=(x_size, y_size),
+                hidden_dim=hidden_dim,
+                commitment_cost=commitment_cost,
+            )
+            self.embed = nn.Identity()  # bypass original
+            self.has_table = False  # force quantizer
+        else:
+            self.embed = nn.Identity()
+            self.position_embedding_table = nn.Parameter(torch.zeros(x_size, y_size, embed_dim))
+            trunc_normal_(self.position_embedding_table, std=.02)
+            self.has_table = True
+
+
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        if self.has_table:
+            embedding = self.position_embedding_table[x, y]
+        else:            
+            data = torch.stack([x, y], dim=-1)
+            if self.shift_normalize:
+                data = data - torch.tensor([self.x_size, self.y_size], device=data.device).float() * 0.5
+            if self.scale_normalize:
+                data = data / torch.tensor([self.x_size, self.y_size], device=data.device).float()
+            if self.log_scale:
+                data = self._to_log_scale(data)
+
+            embedding, idx, loss = self.vq_encoder(data)
+
+        return embedding

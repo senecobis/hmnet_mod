@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hmnet_pth"
+version = "0.1.0"
+description = "PyTorch implementation of the Hierarchical Neural Memory Network (HMNet)"
+authors = [{name = "Authors of HMNet_pth"}]
+license = {text = "BSD-3-Clause"}
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+  "torch>=1.12.1",
+  "torch-scatter",
+  "timm",
+  "hdf5plugin",
+]
+
+[project.urls]
+"Repository" = "https://github.com/senecobis/hmnet_mod"
+
+[tool.setuptools.packages.find]
+include = ["hmnet*"]
+exclude = ["experiments*"]

@@ -415,6 +415,7 @@ class LatentMemory(BlockBase):
             latent = SeqData(self.write_bottom_up.forward_fast_train(self.latent.data, key, value, query_indices), self.latent.meta)
         elif self.fast_inference:
             curr_time, duration = event_metas
+            # NOTE (roberto) basically here they got k,q,v from a table just feeding events
             key, value, query_indices = self.embed(inputs, curr_time, duration)
             if key is None:
                 return self.latent    # no events

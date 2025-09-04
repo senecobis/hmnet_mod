@@ -30,3 +30,7 @@ experiments/*/debug
 experiments/*/data/*/*
 hmnet/utils/psee_toolbox
 !experiments/*/data/*/scripts
+
+build/
+*.egg-info
+dist/
