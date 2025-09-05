@@ -42,7 +42,7 @@ from torch_scatter import scatter
 from ..init import init_transformer, load_state_dict_flexible
 from ..blocks import BlockBase
 from ..layers import ConvBlock, Linear
-from latent_VQ_VAE import Quantizer2D, Quantizer1D
+from .latent_VQ_VAE import Quantizer2D, Quantizer1D
 
 from torch import Tensor
 from typing import Tuple, List, Optional, Dict

@@ -44,6 +44,7 @@ from timm.models.layers import trunc_normal_
 from torch_scatter import scatter
 
 from .vit import Mlp, CrossAttention, PositionEmbedding1D, PositionEmbedding2D, PatchMergingCross, SeqData, TransformerBlock
+from .vit import VQPositionEmbedding1D, VQPositionEmbedding2D
 from .resnet import ResBlock, ResStage, ResEntry
 from .convnext import ConvNeXtBlock, ConvNeXtEntry, ConvNeXtStage
 from ..layers import ConvBlock, Linear, MV2Block, UpConvBlock, ConvPixelShuffle
@@ -1135,4 +1136,15 @@ class ImageBuffer:
         return out_data, out_mask
 
 
+class VQEventEmbedding(EventEmbedding):
+    def __init__(self, input_size: Tuple[int], latent_size: Tuple[int], discrete_time: bool = False, time_bins: int = 100,
+                 duration: int = 5000, dynamic: List[bool] = False, dynamic_dim: Optional[List[int]] = None, out_dim: Optional[List[int]] = None) -> None:
+        
+        super().__init__(input_size, latent_size, discrete_time, time_bins, duration, dynamic, dynamic_dim, out_dim)
+        H, W, T = self.window_h, self.window_w, time_bins
 
+        self.xy   = VQPositionEmbedding2D(W, H, out_dim[0], dynamic=dynamic[0], dynamic_dim=dynamic_dim[0], shift_normalize=True)
+        self.time = VQPositionEmbedding1D(T   , out_dim[1], dynamic=dynamic[1], dynamic_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
+        self.pol  = VQPositionEmbedding1D(2   , out_dim[2], dynamic=dynamic[2], dynamic_dim=dynamic_dim[2])
+
+        
