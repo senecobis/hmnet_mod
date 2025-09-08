@@ -72,12 +72,12 @@ class Quantizer1D(nn.Module):
             self, 
             num_embeddings: int, 
             embedding_dim: int, 
-            max_time: float, 
             hidden_dim: int = 64,
             commitment_cost: float = 0.25
             ):
         super().__init__()
-        self.max_time = max_time
+        assert num_embeddings > 1, "num_embeddings must be greater than 1"
+        self.num_embeddings = num_embeddings
         self.encoder = nn.Sequential(
                 Linear(1, hidden_dim, norm_layer=nn.LayerNorm, act_layer=nn.ReLU),
                 Linear(hidden_dim, embedding_dim, norm_layer=False, act_layer=False),
@@ -85,8 +85,7 @@ class Quantizer1D(nn.Module):
         self.vq = VectorQuantizer(num_embeddings, embedding_dim, commitment_cost)
 
     def forward(self, t: torch.Tensor):
-        # t: (B, 1) timestamps
-        norm_t = (t.float() / self.max_time) * 2 - 1  # normalize to [-1, 1]
+        norm_t = (t.float() / (self.num_embeddings - 1)) * 2 - 1
         z = self.encoder(norm_t)  # (B, embedding_dim)
         q, idx, loss = self.vq(z)
         return q, idx, loss
