@@ -1364,8 +1364,6 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
         self,
         x_size: int,
         embed_dim: int,
-        num_embeddings: int,
-        max_time: float,
         hidden_dim: int = 64,
         commitment_cost: float = 0.25,
         dynamic: bool = False,   # force quantizer for dynamic mode
@@ -1375,9 +1373,8 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
 
         if dynamic:
             self.vq_encoder = Quantizer1D(
-                num_embeddings=num_embeddings,
+                num_embeddings=x_size,  # set to x_size for unique encoding
                 embedding_dim=embed_dim,
-                max_time=max_time,
                 hidden_dim=hidden_dim,
                 commitment_cost=commitment_cost,
             )
@@ -1403,7 +1400,7 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
             if self.log_scale:
                 data = self._to_log_scale(data)
             embedding, idx, loss = self.vq_encoder(data)
-        return embedding
+        return embedding, idx, loss
 
 
 # === VQ-Position Embedding for 2D (coordinates) ===
@@ -1413,7 +1410,7 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
         x_size: int,
         y_size: int,
         embed_dim: int,
-        num_embeddings: int,
+        num_embeddings: int = 512,
         hidden_dim: int = 64,
         commitment_cost: float = 0.25,
         dynamic: bool = False,
@@ -1452,4 +1449,4 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
 
             embedding, idx, loss = self.vq_encoder(data)
 
-        return embedding
+        return embedding, idx, loss

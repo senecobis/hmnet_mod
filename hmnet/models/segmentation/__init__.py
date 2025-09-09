@@ -29,3 +29,4 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .hmseg import HMSeg
+from .hmsegVQ import HMSegVQ

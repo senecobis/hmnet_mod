@@ -125,7 +125,7 @@ class HMNet(BlockBase):
 
         for time_idx, (events, images, image_metas) in enumerate(zip(list_events, list_images, list_image_metas)):
             # forward one time step
-            out1, out2, out3 = self._forward_one_step(events, image_metas, image_input=images, fast_training=fast_training)
+            out1, out2, out3, quant_loss = self._forward_one_step(events, image_metas, image_input=images, fast_training=fast_training)
 
             if out1 is None or out2 is None or out3 is None:
                 continue
@@ -139,7 +139,7 @@ class HMNet(BlockBase):
             self.memory2.detach()
             self.memory3.detach()
 
-        return outputs1, outputs2, outputs3
+        return (outputs1, outputs2, outputs3), quant_loss
 
     def inference(self, events, image_metas, image_input=None) -> Tensor:
         return self._forward_one_step(events, image_metas, image_input)
@@ -155,11 +155,11 @@ class HMNet(BlockBase):
         z1, message1 = self.memory1.sync_and_get_state()
 
         # forward one time step
-        out3 = self.memory3(z2, None, image_input=image_input)
-        out2 = self.memory2(z1, message3)
-        out1 = self.memory1(events, message2, event_metas=(curr_time, duration), fast_training=fast_training)
+        out3, _ = self.memory3(z2, None, image_input=image_input)
+        out2, _ = self.memory2(z1, message3)
+        out1, quant_loss = self.memory1(events, message2, event_metas=(curr_time, duration), fast_training=fast_training)
 
-        return out1, out2, out3
+        return out1, out2, out3, quant_loss
 
     def _gather(self, list_dst, list_src, gather_indices, time_idx):
         time_indices = gather_indices['time']

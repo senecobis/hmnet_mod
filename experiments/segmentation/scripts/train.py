@@ -44,6 +44,7 @@ parser.add_argument('--master', type=str, default='localhost', help='[DDP] IP ad
 parser.add_argument('--node'  , type=str, default='1/1'      , help='[DDP] Specify node index and total number of nodes in the form of "{Node_Index}/{Total_Number_of_Nodes}" (e.g. 1/2, 2/2).\
                                                                      Master node must have node index = 1.\
                                                                      Specify "1/1" for single node DDP (default)')
+parser.add_argument('--wandb', action='store_true', help='[DDP] Use Weights & Biases for logging')
 args = parser.parse_args()
 
 import os
@@ -52,11 +53,10 @@ import shutil
 import numpy as np
 import time
 timer = time.perf_counter
-import logging
 from importlib import machinery
 from collections import OrderedDict
-import traceback
 from copy import deepcopy
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -68,6 +68,8 @@ from hmnet.models.base.init import load_state_dict_matched
 from hmnet.utils.common import makedirs, fix_seed, split_list, MovingAverageMeter
 from hmnet.utils import common as utils
 from hmnet.dataset.custom_loader import PseudoEpochLoader
+
+import wandb
 
 torch.backends.cudnn.benchmark = True
 
@@ -128,6 +130,13 @@ def main(local_rank, args, dist_settings=None):
         )
         model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], **settings)
 
+    # import wandb logging
+    if args.wandb:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        run = wandb.init(project="implicit-kernel", name=f"VQ_{timestamp}", config=config)
+    else:
+        run = None
+
     # set dataset
     train_dataset = config.get_dataset()
 
@@ -142,7 +151,7 @@ def main(local_rank, args, dist_settings=None):
     # iter epochs
     for epoch in range(start_epoch, num_epochs):
 
-        train(epoch, train_loader, model, optimizer, scheduler, scaler, rank, config)
+        train(epoch, train_loader, model, optimizer, scheduler, scaler, rank, config, run)
 
         # save
         if rank == 0:
@@ -158,7 +167,7 @@ def main(local_rank, args, dist_settings=None):
         dist.barrier()
         dist.destroy_process_group()
 
-def train(epoch, loader, model, optimizer, scheduler, scaler, rank, config):
+def train(epoch, loader, model, optimizer, scheduler, scaler, rank, config, run=None):
     print_log('start epoch', rank, config)
     
     # switch to train mode
@@ -213,6 +222,12 @@ def train(epoch, loader, model, optimizer, scheduler, scaler, rank, config):
                 loss.backward()
                 optimizer.step()
                 scheduler.step(loader.nowiter)
+
+            if rank == 0 and run is not None:
+                log_dict = { 'train/'+key: value for key, value in loss_reports.items() }
+                log_dict['train/lr'] = optimizer.param_groups[0]['lr']
+                wandb.log(log_dict, step=loader.nowiter)
+                
 
         # measure elapsed time
         meter.record_batch_time()

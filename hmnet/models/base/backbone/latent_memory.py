@@ -89,7 +89,8 @@ class LatentMemory(BlockBase):
         trunc_normal_(self.init_latent, std=.02)
 
         if event_write:
-            self.embed = EventEmbedding(latent_size=latent_size, **cfg_embed)
+            self.embed = VQEventEmbedding(latent_size=latent_size, **cfg_embed)
+            #self.embed = EventEmbedding(latent_size=latent_size, **cfg_embed)
             self.write_bottom_up = EventWrite(input_dim, latent_dim, num_heads, mlp_ratio=4, latent_size=latent_size, **cfg_write)
         else:
             self.write_bottom_up = WriteBottomUp(input_dim, latent_dim, num_heads, latent_stride, mlp_ratio=4, **cfg_write)
@@ -242,7 +243,7 @@ class LatentMemory(BlockBase):
         elif self.use_cuda_stream and not self.training:
             self._inference_cuda_stream(inputs, message_from_top, image_input, event_metas)
         else:
-            self._forward(inputs, message_from_top, image_input, event_metas, fast_training)
+            _, quant_loss = self._forward(inputs, message_from_top, image_input, event_metas, fast_training)
 
         if self.freq == 1:
             # require sync at the end of each time step
@@ -250,7 +251,7 @@ class LatentMemory(BlockBase):
 
         self.time_idx += 1
 
-        return self.out_buffer
+        return self.out_buffer, quant_loss
 
 
     def _forward(self, inputs, message_from_top=None, image_input=None, event_metas=None, fast_training=False):
@@ -273,18 +274,19 @@ class LatentMemory(BlockBase):
             self.latent = self._forward_write_top_down(message_from_top)
 
         # bottom-up write, readout
+        quant_loss = 0
         if cycle_st:
             if self.image_write_enabled:
                 images, valid_batch = self.image_buffer.read()
                 self.latent = self._forward_write_image(images, valid_batch)
             if self.event_write:
-                self.latent = self._forward_event_write(inputs, event_metas, fast_training)
+                self.latent, quant_loss = self._forward_event_write(inputs, event_metas, fast_training)
             else:
                 self.latent = self._forward_write_bottom_up(inputs)
             self.latent = self._forward_update()
             self.out = self._readout()
 
-        return self.out_buffer
+        return self.out_buffer, quant_loss
 
     def _inference_cuda_stream(self, inputs, message_from_top=None, image_input=None, event_metas=None):
         cycle_st, cycle_ed, warmup_finished = self._timing_flags()
@@ -423,12 +425,12 @@ class LatentMemory(BlockBase):
             latent = SeqData(self.write_bottom_up.forward_fast_train(self.latent.data, key, value, query_indices), self.latent.meta)
         else:
             curr_time, duration = event_metas
-            data_array, query_indices = self.embed(inputs, curr_time, duration)
+            data_array, query_indices, quant_loss = self.embed(inputs, curr_time, duration)
             if data_array is None:
                 return self.latent    # no events
             latent = SeqData(self.write_bottom_up(self.latent.data, data_array, query_indices), self.latent.meta)
 
-        return latent
+        return latent, quant_loss
 
     def _forward_write_bottom_up(self, inputs: SeqData, fast_training: bool = False) -> SeqData:
         return self.write_bottom_up(self.latent, inputs)
@@ -894,9 +896,9 @@ class EventEmbedding(BlockBase):
         self.window_w = self.input_w // self.latent_w
 
         H, W, T = self.window_h, self.window_w, time_bins
-        self.xy   = PositionEmbedding2D(W, H, out_dim[0], dynamic=dynamic[0], dynamic_dim=dynamic_dim[0], shift_normalize=True)
-        self.time = PositionEmbedding1D(T   , out_dim[1], dynamic=dynamic[1], dynamic_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
-        self.pol  = PositionEmbedding1D(2   , out_dim[2], dynamic=dynamic[2], dynamic_dim=dynamic_dim[2])
+        self.xy   = PositionEmbedding2D(W, H, embed_dim=out_dim[0], dynamic=dynamic[0], dynamic_dim=dynamic_dim[0], shift_normalize=True)
+        self.time = PositionEmbedding1D(x_size=T   , embed_dim=out_dim[1], dynamic=dynamic[1], dynamic_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
+        self.pol  = PositionEmbedding1D(x_size=2   , embed_dim=out_dim[2], dynamic=dynamic[2], dynamic_dim=dynamic_dim[2])
 
     def generate_param_table(self) -> None:
         self.xy.generate_param_table()
@@ -1143,8 +1145,44 @@ class VQEventEmbedding(EventEmbedding):
         super().__init__(input_size, latent_size, discrete_time, time_bins, duration, dynamic, dynamic_dim, out_dim)
         H, W, T = self.window_h, self.window_w, time_bins
 
-        self.xy   = VQPositionEmbedding2D(W, H, out_dim[0], dynamic=dynamic[0], dynamic_dim=dynamic_dim[0], shift_normalize=True)
-        self.time = VQPositionEmbedding1D(T   , out_dim[1], dynamic=dynamic[1], dynamic_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
-        self.pol  = VQPositionEmbedding1D(2   , out_dim[2], dynamic=dynamic[2], dynamic_dim=dynamic_dim[2])
+        self.xy   = VQPositionEmbedding2D(W, H, embed_dim=out_dim[0], dynamic=dynamic[0], hidden_dim=dynamic_dim[0], shift_normalize=True)
+        self.time = VQPositionEmbedding1D(T   , embed_dim=out_dim[1], dynamic=dynamic[1], hidden_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
+        self.pol  = VQPositionEmbedding1D(2   , embed_dim=out_dim[2], dynamic=dynamic[2], hidden_dim=dynamic_dim[2])
+    
+    def _forward_single(self, events: Tensor, curr_time: int, duration: int) -> Tuple[Tensor,Tensor]:
+        if len(events) == 0:
+            return None, None
 
-        
+        t, x, y, p = events[:,0], events[:,1], events[:,2], events[:,3]
+        device = x.device
+
+        t0 = curr_time - duration
+        dt = t - t0
+
+        # window indices
+        #wx = x // self.window_w
+        #wy = y // self.window_h
+        wx = torch.div(x, self.window_w, rounding_mode='trunc')
+        wy = torch.div(y, self.window_h, rounding_mode='trunc')
+        indices = (wy * self.latent_w + wx).long()
+
+        # get relative position and discretize time
+        x = x % self.window_w
+        y = y % self.window_h
+        if self.discrete_time:
+            #dt = (dt // int(self.time_delta))
+            dt = torch.div(dt, int(self.time_delta), rounding_mode='trunc')
+        else:
+            dt = dt / self.time_delta
+
+        # get embeddings
+        xy_embedding, q_indices_xy, loss_xy = self.xy(x, y)
+        time_embedding, q_indices_t, loss_t = self.time(dt)
+        pol_embedding, q_indices_p, loss_p = self.pol(p)
+
+        embeddings = torch.cat([xy_embedding, time_embedding, pol_embedding], dim=1)
+
+        # quantisers loss
+        q_loss = loss_xy + loss_t + loss_p
+
+        return embeddings, indices, q_loss    # (L, C1+C2+C3), (L,), (L,)

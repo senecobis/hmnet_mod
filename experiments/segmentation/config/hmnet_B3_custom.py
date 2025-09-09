@@ -41,7 +41,7 @@ from hmnet.utils.common import CDict as dict
 from hmnet.utils.transform import Compose, RandomCrop, RandomFlip, RandomResize, Padding, Resize, ResizeInside
 from hmnet.dataset.dsec import EventPacketStream
 from hmnet.dataset.custom_collate_fn import collate_keep_dict
-from hmnet.models.segmentation import HMSeg
+from hmnet.models.segmentation import HMSegVQ
 
 TRAIN_DURATION = 200e3
 DELTA_T = 5e3
@@ -245,7 +245,7 @@ class TrainSettings(object):
     # ======== model settings ========
     def get_model(self):
         d0 = torch.device('cuda:0')
-        model = HMSeg(backbone, neck, head, aux_head, devices=[d0,d0,d0,d0])
+        model = HMSegVQ(backbone, neck, head, aux_head, devices=[d0,d0,d0,d0])
         model.init_weights()
         return model
 
@@ -284,7 +284,7 @@ class TestSettings(object):
             d = torch.device('cuda:0')
             devices = [d, d, d, d]
 
-        model = HMSeg(backbone, neck, head, aux_head, devices=devices, test_aug=None)
+        model = HMSegVQ(backbone, neck, head, aux_head, devices=devices, test_aug=None)
         model.init_weights()
 
         if mode == 'multi_process':
