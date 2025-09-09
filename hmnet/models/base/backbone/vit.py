@@ -1388,6 +1388,15 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
             trunc_normal_(self.position_embedding_table, std=.02)
             self.has_table = True
 
+    def generate_quantizer_from_table(self):
+        """Copy learned table embeddings into quantizer codebook."""
+        if self.has_table and self.vq_encoder is not None:
+            with torch.no_grad():
+                table = self.position_embedding_table.detach()
+                n = min(self.vq_encoder.num_embeddings, table.shape[0])
+                self.vq_encoder.embedding.weight[:n].copy_(table[:n])
+            self.has_table = False  # switch to quantizer mode
+
     def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
         if self.has_table:
             embedding = self.position_embedding_table[x.long()]
@@ -1433,7 +1442,15 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
             self.position_embedding_table = nn.Parameter(torch.zeros(x_size, y_size, embed_dim))
             trunc_normal_(self.position_embedding_table, std=.02)
             self.has_table = True
-
+    
+    def generate_quantizer_from_table(self):
+        """Copy learned table embeddings into quantizer codebook."""
+        if self.has_table and self.vq_encoder is not None:
+            with torch.no_grad():
+                table = self.position_embedding_table.detach().view(-1, table.shape[-1])
+                n = min(self.vq_encoder.num_embeddings, table.shape[0])
+                self.vq_encoder.embedding.weight[:n].copy_(table[:n])
+            self.has_table = False  # switch to quantizer mode
 
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
         if self.has_table:
