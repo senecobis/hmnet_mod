@@ -54,6 +54,10 @@ class Quantizer2D(nn.Module):
             Linear(hidden_dim, embedding_dim, norm_layer=False, act_layer=False),
         )
         self.vq = VectorQuantizer(num_embeddings, embedding_dim, commitment_cost)
+        
+    @property
+    def device(self):
+        return self.encoder[0].linear.weight.device
 
     def forward(self, xy: torch.Tensor):
         # xy: (B, 2) with pixel coordinates
@@ -83,6 +87,10 @@ class Quantizer1D(nn.Module):
                 Linear(hidden_dim, embedding_dim, norm_layer=False, act_layer=False),
             )
         self.vq = VectorQuantizer(num_embeddings, embedding_dim, commitment_cost)
+    
+    @property
+    def device(self):
+        return self.encoder[0].linear.weight.device
 
     def forward(self, t: torch.Tensor):
         norm_t = (t.float() / (self.num_embeddings - 1)) * 2 - 1
