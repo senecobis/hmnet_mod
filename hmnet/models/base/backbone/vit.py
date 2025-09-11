@@ -1370,6 +1370,13 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
         **kwargs
     ) -> None:
         super().__init__(x_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
+        
+        self.x_size = x_size
+        self.embed_dim = embed_dim
+        # self.num_embeddings = num_embeddings
+        self.hidden_dim = hidden_dim
+        self.commitment_cost = commitment_cost
+        self.dynamic = dynamic
 
         if dynamic:
             self.embed = Quantizer1D(
@@ -1402,7 +1409,9 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
             table, _, _ = self.embed(data)
             self.position_embedding_table = nn.Parameter(table.detach())
             self.has_table = True
-            
+        
+    # TODO: When we use the table we do not output and index and most importantly the commitment loss
+    # We need to find a way to produce results from a table and still output a commitment loss
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
         if self.has_table:
@@ -1433,6 +1442,14 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
         **kwargs
     ) -> None:
         super().__init__(x_size, y_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
+        
+        self.x_size = x_size
+        self.y_size = y_size
+        self.embed_dim = embed_dim
+        self.num_embeddings = num_embeddings
+        self.hidden_dim = hidden_dim
+        self.commitment_cost = commitment_cost
+        self.dynamic = dynamic
 
         if dynamic:
             self.vq_encoder = Quantizer2D(
@@ -1449,7 +1466,8 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
             self.position_embedding_table = nn.Parameter(torch.zeros(x_size, y_size, embed_dim))
             trunc_normal_(self.position_embedding_table, std=.02)
             self.has_table = True
-    
+
+    # TODO the table formation must be changed to match the 1D version
     def generate_quantizer_from_table(self):
         """Copy learned table embeddings into quantizer codebook."""
         if self.has_table and self.vq_encoder is not None:
@@ -1460,8 +1478,10 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
             self.has_table = False  # switch to quantizer mode
 
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        # TODO: When we use the table we do not output and index and most importantly the commitment loss
+        # We need to find a way to produce results from a table and still output a commitment loss
         if self.has_table:
-            embedding = self.position_embedding_table[x, y]
+            embedding = self.position_embedding_table[x.long(), y.long()]
         else:            
             data = torch.stack([x, y], dim=-1)
             if self.shift_normalize:

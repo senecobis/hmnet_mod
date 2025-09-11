@@ -61,7 +61,7 @@ backbone = dict(
         duration      = DELTA_T,
         discrete_time = True,
         time_bins     = 100,
-        dynamic       = [True,True,True],
+        dynamic       = [False,False,False],
         dynamic_dim   = [32, 32, 32],
     ),
 
