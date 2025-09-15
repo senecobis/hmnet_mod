@@ -22,9 +22,6 @@ class HMSegVQ(HMSeg):
     def __init__(self, backbone, neck, seg_head, aux_head, devices, test_aug=None) -> None:
         super().__init__(backbone, neck, seg_head, aux_head, devices, test_aug=test_aug)
         self.backbone = build_backbone(backbone)
-
-    def VQ_losses(self):
-        pass
     
     def forward(self, list_events, list_images, list_image_metas, list_gt, init_states=True) -> Tensor:
         """Here we override the forward function to return quantization losses as well
@@ -45,7 +42,7 @@ class HMSegVQ(HMSeg):
                                 list_images=list_images, 
                                 init_states=init_states, 
                                 detach=True, 
-                                fast_training=False
+                                fast_training=True
                                 )
 
         # Neck, Head

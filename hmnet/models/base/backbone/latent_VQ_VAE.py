@@ -15,8 +15,8 @@ class VectorQuantizer(nn.Module):
         # Define explicitly the discrete embeddings and initialize their weights uniformly. 
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         self.embedding.weight.data.uniform_(-1/self.num_embeddings, 1/self.num_embeddings)
-
-    def forward(self, z: torch.Tensor):
+        
+    def quantize_embeddings(self, z: torch.Tensor):
         # z: (B, D) or (L, D)
         flat_z = z.view(-1, self.embedding_dim)
 
@@ -29,10 +29,26 @@ class VectorQuantizer(nn.Module):
 
         encoding_indices = torch.argmin(distances, dim=1)  # (L,)
         quantized = self.embedding(encoding_indices)
+        return flat_z, quantized, encoding_indices
+
+    def forward(self, z: torch.Tensor):
+        flat_z, quantized, encoding_indices = self.quantize_embeddings(z)
+        
+        # straight-through trick
+        loss = F.mse_loss(quantized, flat_z.detach()) + self.commitment_cost * F.mse_loss(quantized.detach(), flat_z)
+        quantized = flat_z + (quantized - flat_z).detach()
+
+        return quantized.view(*z.shape), encoding_indices.view(z.shape[0], -1), loss
+    
+    def forward_batched(self, z: torch.Tensor):
+        flat_z, quantized, encoding_indices = self.quantize_embeddings(z)
 
         # straight-through trick
         quantized = flat_z + (quantized - flat_z).detach()
-        loss = F.mse_loss(quantized.detach(), flat_z) + self.commitment_cost * F.mse_loss(quantized, flat_z.detach())
+        sq_err_0 = F.mse_loss(quantized, flat_z.detach(), reduction="none")
+        sq_err_1 = self.commitment_cost * F.mse_loss(quantized.detach(), flat_z, reduction="none")
+
+        loss = sq_err_0 + sq_err_1
 
         return quantized.view(*z.shape), encoding_indices.view(z.shape[0], -1), loss
 
@@ -60,12 +76,9 @@ class Quantizer2D(nn.Module):
         return self.encoder[0].linear.weight.device
 
     def forward(self, xy: torch.Tensor):
-        # xy: (B, 2) with pixel coordinates
-        norm_xy = xy.clone().float()
-        norm_xy[:, 0] = norm_xy[:, 0] / (self.img_size[0] - 1) * 2 - 1  # normalize x to [-1, 1]
-        norm_xy[:, 1] = norm_xy[:, 1] / (self.img_size[1] - 1) * 2 - 1  # normalize y to [-1, 1]
-
-        z = self.encoder(norm_xy)  # (B, embedding_dim)
+        # xy: (B, 2) with pixel coordinates normalized to [-2, +2]
+        z = self.encoder(xy)  # (B, embedding_dim)
+        # q, idx, loss = self.vq.forward_batched(z)
         q, idx, loss = self.vq(z)
         return q, idx, loss
 

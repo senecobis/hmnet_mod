@@ -998,12 +998,6 @@ class EventEmbedding(BlockBase):
         self.value_table = value.view(t_size, x_size, y_size, p_size, H, -1)
         print('Generate Key Value table for events')
 
-    #def _to_fast_model(self):
-    #    self.xy.generate_param_table()
-    #    self.time.generate_param_table()
-    #    self.pol.generate_param_table(data=torch.tensor([-1,1], dtype=torch.float).view(-1,1))
-    #    print('Generate table for embedding xy, t, p')
-
     def forward(self, events: Tensor, curr_time: List[int], duration: List[int]) -> Tuple[Tensor,Tensor]:
         if len(curr_time) == 1:
             events = events[0]
@@ -1013,11 +1007,6 @@ class EventEmbedding(BlockBase):
         else:
             dt, x, y, p, b = self.preproc_events(events, curr_time, duration)
             return self._forward(dt, x, y, p, b)
-
-    #def forward_fast_train(self, evdata: Tensor, batch_indices: Tensor) -> Tuple[Tensor,Tensor]:
-    #    dt, x, y, p = evdata[:,0], evdata[:,1], evdata[:,2], evdata[:,3]
-    #    b = batch_indices
-    #    return self._forward(dt, x, y, p, b)
 
     def forward_fast_train(self, lat1, list_events, list_image_metas):
         split_sizes = []
@@ -1145,10 +1134,10 @@ class VQEventEmbedding(EventEmbedding):
         super().__init__(input_size, latent_size, discrete_time, time_bins, duration, dynamic, dynamic_dim, out_dim)
         H, W, T = self.window_h, self.window_w, time_bins
 
-        self.xy   = VQPositionEmbedding2D(W, H, embed_dim=out_dim[0], dynamic=dynamic[0], hidden_dim=dynamic_dim[0], shift_normalize=True)
-        self.time = VQPositionEmbedding1D(T   , embed_dim=out_dim[1], dynamic=dynamic[1], hidden_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
-        self.pol  = VQPositionEmbedding1D(2   , embed_dim=out_dim[2], dynamic=dynamic[2], hidden_dim=dynamic_dim[2])
-    
+        self.xy   = VQPositionEmbedding2D(W, H, embed_dim=out_dim[0], hidden_dim=dynamic_dim[0], shift_normalize=True)
+        self.time = VQPositionEmbedding1D(T   , embed_dim=out_dim[1], hidden_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
+        self.pol  = VQPositionEmbedding1D(2   , embed_dim=out_dim[2], hidden_dim=dynamic_dim[2])
+
     def _forward_single(self, events: Tensor, curr_time: int, duration: int) -> Tuple[Tensor,Tensor]:
         if len(events) == 0:
             return None, None
@@ -1160,8 +1149,6 @@ class VQEventEmbedding(EventEmbedding):
         dt = t - t0
 
         # window indices
-        #wx = x // self.window_w
-        #wy = y // self.window_h
         wx = torch.div(x, self.window_w, rounding_mode='trunc')
         wy = torch.div(y, self.window_h, rounding_mode='trunc')
         indices = (wy * self.latent_w + wx).long()
@@ -1170,8 +1157,39 @@ class VQEventEmbedding(EventEmbedding):
         x = x % self.window_w
         y = y % self.window_h
         if self.discrete_time:
-            #dt = (dt // int(self.time_delta))
             dt = torch.div(dt, int(self.time_delta), rounding_mode='trunc')
+        else:
+            dt = dt / self.time_delta
+
+        # get embeddings
+        time_embedding, q_indices_t, loss_t = self.time(dt)
+        xy_embedding, q_indices_xy, loss_xy = self.xy(x, y)
+        pol_embedding, q_indices_p, loss_p = self.pol(p)
+
+        embeddings = torch.cat([xy_embedding, time_embedding, pol_embedding], dim=1)
+
+        # quantisers loss
+        q_loss = loss_xy + loss_t + loss_p
+
+        return embeddings, indices, q_loss    # (L, C1+C2+C3), (L,), (L,)
+
+    def _forward(self, dt, x, y, p, b):
+        if len(dt) == 0:
+            return None, None
+
+        if not self.pol.dynamic:
+            p = ((p + 1) * 0.5).to(p.dtype)
+
+        # window indices
+        wx = torch.div(x, self.window_w, rounding_mode='trunc')
+        wy = torch.div(y, self.window_h, rounding_mode='trunc')
+        indices = (b * self.latent_h * self.latent_w + wy * self.latent_w + wx).long()
+
+        # get relative position and discretize time
+        x = x % self.window_w
+        y = y % self.window_h
+        if self.discrete_time:
+            dt = torch.div(dt, self.time_delta, rounding_mode='trunc')
         else:
             dt = dt / self.time_delta
 
@@ -1185,4 +1203,44 @@ class VQEventEmbedding(EventEmbedding):
         # quantisers loss
         q_loss = loss_xy + loss_t + loss_p
 
-        return embeddings, indices, q_loss    # (L, C1+C2+C3), (L,), (L,)
+        return embeddings, indices, q_loss    # (L, C1+C2+C3), (L,)
+
+    def forward_fast_train(self, lat1, list_events, list_image_metas):
+        split_sizes = []
+        batch_indices = []
+        evdata = []
+        for events, image_meta in zip(list_events, list_image_metas):
+            curr_time = [ meta['curr_time_crop'] for meta in image_meta ]
+            duration = [ meta['delta_t'] for meta in image_meta ]
+
+            dt, x, y, p, b = self.preproc_events(events, curr_time, duration)
+            ev = torch.stack([dt, x, y, p], dim=-1)
+
+            evdata.append(ev)
+            batch_indices.append(b)
+            split_sizes.append(len(dt))
+
+        evdata = torch.cat(evdata, dim=0)
+        batch_indices = torch.cat(batch_indices, dim=0)
+
+        dt, x, y, p = evdata[:,0], evdata[:,1], evdata[:,2], evdata[:,3]
+        b = batch_indices
+        ev_tensor, ev_q, q_loss = self._forward(dt, x, y, p, batch_indices)
+
+        if ev_tensor is None:
+            list_evdata = [ [ list(), list(), list() ] for _ in range(len(list_events)) ]
+            return list_evdata
+
+        H = lat1.write_bottom_up.attn.num_heads
+        C = lat1.latent_dim
+        ev_tensor = lat1.write_bottom_up.norm_input(ev_tensor)
+        kv = lat1.write_bottom_up.attn.kv(ev_tensor).view(-1, 2, H, C // H).permute(1,0,2,3).contiguous()
+        key, value = kv[0], kv[1]    # (L, H, C)
+
+        list_keys = key.split(split_sizes)
+        list_values = value.split(split_sizes)
+        list_ev_q = ev_q.split(split_sizes)
+
+        list_evdata = list(zip(list_keys, list_values, list_ev_q))
+
+        return list_evdata, q_loss

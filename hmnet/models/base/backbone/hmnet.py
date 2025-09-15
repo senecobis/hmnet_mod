@@ -121,7 +121,7 @@ class HMNet(BlockBase):
 
         if fast_training:
             # extract key value in advance for fast trainig
-            list_events = self.memory1.embed.forward_fast_train(self.memory1, list_events, list_image_metas)
+            list_events, quant_loss = self.memory1.embed.forward_fast_train(self.memory1, list_events, list_image_metas)
 
         for time_idx, (events, images, image_metas) in enumerate(zip(list_events, list_images, list_image_metas)):
             # forward one time step

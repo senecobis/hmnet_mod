@@ -1366,65 +1366,32 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
         embed_dim: int,
         hidden_dim: int = 64,
         commitment_cost: float = 0.25,
-        dynamic: bool = False,   # force quantizer for dynamic mode
         **kwargs
     ) -> None:
-        super().__init__(x_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
+        super().__init__(x_size, embed_dim, dynamic=False, dynamic_dim=hidden_dim, **kwargs)
         
         self.x_size = x_size
         self.embed_dim = embed_dim
         # self.num_embeddings = num_embeddings
         self.hidden_dim = hidden_dim
         self.commitment_cost = commitment_cost
-        self.dynamic = dynamic
 
-        if dynamic:
-            self.embed = Quantizer1D(
-                num_embeddings=x_size,  # set to x_size for unique encoding
-                embedding_dim=embed_dim,
-                hidden_dim=hidden_dim,
-                commitment_cost=commitment_cost,
-            )
-            self.has_table = False  # force quantizer
-        else:
-            # === static embedding table ===
-            self.embed = nn.Identity()
-            self.position_embedding_table = nn.Parameter(torch.zeros(x_size, embed_dim))
-            trunc_normal_(self.position_embedding_table, std=.02)
-            self.has_table = True
-
-    def generate_quantizer_from_table(self, data=None) -> None:
-        """Copy learned table embeddings into quantizer codebook."""
-        if not self.has_table and self.dynamic:
-            if data is None:
-                data = torch.arange(self.x_size).view(-1,1).float()
-            data = data.to(self.embed.device)
-            if self.shift_normalize:
-                data = data - self.x_size * 0.5
-            if self.scale_normalize:
-                data = data / self.x_size
-            if self.log_scale:
-                data = self._to_log_scale(data)
-            
-            table, _, _ = self.embed(data)
-            self.position_embedding_table = nn.Parameter(table.detach())
-            self.has_table = True
+        self.embed = Quantizer1D(
+            num_embeddings=x_size,  # set to x_size for unique encoding
+            embedding_dim=embed_dim,
+            hidden_dim=hidden_dim,
+            commitment_cost=commitment_cost,
+        )
         
-    # TODO: When we use the table we do not output and index and most importantly the commitment loss
-    # We need to find a way to produce results from a table and still output a commitment loss
-
     def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
-        if self.has_table:
-            embedding = self.position_embedding_table[x.long()]
-        else:
-            data = x.view(-1,1).float()
-            if self.shift_normalize:
-                data = data - self.x_size * 0.5
-            if self.scale_normalize:
-                data = data / self.x_size
-            if self.log_scale:
-                data = self._to_log_scale(data)
-            embedding, idx, loss = self.embed(data)
+        data = x.view(-1,1).float()
+        if self.shift_normalize:
+            data = data - self.x_size * 0.5
+        if self.scale_normalize:
+            data = data / self.x_size
+        if self.log_scale:
+            data = self._to_log_scale(data)
+        embedding, idx, loss = self.embed(data)
         return embedding, idx, loss
 
 
@@ -1438,59 +1405,33 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
         num_embeddings: int = 512,
         hidden_dim: int = 64,
         commitment_cost: float = 0.25,
-        dynamic: bool = False,
         **kwargs
     ) -> None:
-        super().__init__(x_size, y_size, embed_dim, dynamic=dynamic, dynamic_dim=hidden_dim, **kwargs)
-        
+        super().__init__(x_size, y_size, embed_dim, dynamic=False, dynamic_dim=hidden_dim, **kwargs)
+
         self.x_size = x_size
         self.y_size = y_size
         self.embed_dim = embed_dim
         self.num_embeddings = num_embeddings
         self.hidden_dim = hidden_dim
         self.commitment_cost = commitment_cost
-        self.dynamic = dynamic
 
-        if dynamic:
-            self.vq_encoder = Quantizer2D(
-                num_embeddings=num_embeddings,
-                embedding_dim=embed_dim,
-                img_size=(x_size, y_size),
-                hidden_dim=hidden_dim,
-                commitment_cost=commitment_cost,
-            )
-            self.embed = nn.Identity()  # bypass original
-            self.has_table = False  # force quantizer
-        else:
-            self.embed = nn.Identity()
-            self.position_embedding_table = nn.Parameter(torch.zeros(x_size, y_size, embed_dim))
-            trunc_normal_(self.position_embedding_table, std=.02)
-            self.has_table = True
+        self.embed = Quantizer2D(
+            num_embeddings=num_embeddings,
+            embedding_dim=embed_dim,
+            img_size=(x_size, y_size),
+            hidden_dim=hidden_dim,
+            commitment_cost=commitment_cost,
+        )
 
-    # TODO the table formation must be changed to match the 1D version
-    def generate_quantizer_from_table(self):
-        """Copy learned table embeddings into quantizer codebook."""
-        if self.has_table and self.vq_encoder is not None:
-            with torch.no_grad():
-                table = self.position_embedding_table.detach().view(-1, table.shape[-1])
-                n = min(self.vq_encoder.num_embeddings, table.shape[0])
-                self.vq_encoder.embedding.weight[:n].copy_(table[:n])
-            self.has_table = False  # switch to quantizer mode
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:          
+        data = torch.stack([x, y], dim=-1)
+        if self.shift_normalize:
+            data = data - torch.tensor([self.x_size, self.y_size], device=data.device).float() * 0.5
+        if self.scale_normalize:
+            data = data / torch.tensor([self.x_size, self.y_size], device=data.device).float()
+        if self.log_scale:
+            data = self._to_log_scale(data)
 
-    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
-        # TODO: When we use the table we do not output and index and most importantly the commitment loss
-        # We need to find a way to produce results from a table and still output a commitment loss
-        if self.has_table:
-            embedding = self.position_embedding_table[x.long(), y.long()]
-        else:            
-            data = torch.stack([x, y], dim=-1)
-            if self.shift_normalize:
-                data = data - torch.tensor([self.x_size, self.y_size], device=data.device).float() * 0.5
-            if self.scale_normalize:
-                data = data / torch.tensor([self.x_size, self.y_size], device=data.device).float()
-            if self.log_scale:
-                data = self._to_log_scale(data)
-
-            embedding, idx, loss = self.vq_encoder(data)
-
+        embedding, idx, loss = self.embed(data)
         return embedding, idx, loss
