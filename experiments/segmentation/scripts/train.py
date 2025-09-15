@@ -29,6 +29,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+
 parser = argparse.ArgumentParser()
 parser.add_argument('config', type=str, help='Config file')
 parser.add_argument('--seed', type=int, default=42, help='')
@@ -52,6 +53,7 @@ import sys
 import shutil
 import numpy as np
 import time
+from tqdm import tqdm
 timer = time.perf_counter
 from importlib import machinery
 from collections import OrderedDict
@@ -150,7 +152,9 @@ def main(local_rank, args, dist_settings=None):
 
     # iter epochs
     for epoch in range(start_epoch, num_epochs):
-
+        if rank == 0:
+            print_log('== start epoch %d/%d ===' % (epoch+1, num_epochs), rank, config)
+        
         train(epoch, train_loader, model, optimizer, scheduler, scaler, rank, config, run)
 
         # save
@@ -178,7 +182,7 @@ def train(epoch, loader, model, optimizer, scheduler, scaler, rank, config, run=
     meter.reset()
     meter.timer_start()
 
-    for batch_idx, data in enumerate(loader):
+    for batch_idx, data in tqdm(enumerate(loader)):
 
         list_events, list_images, list_image_metas, list_labels = parse_event_data(data)
         meter.record_data_time()

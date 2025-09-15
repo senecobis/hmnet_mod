@@ -118,6 +118,10 @@ class HMNet(BlockBase):
         outputs1 = self.memory1.place_holder(num_output)
         outputs2 = self.memory2.place_holder(num_output)
         outputs3 = self.memory3.place_holder(num_output)
+        
+        # set place holder for quantization loss
+        quant_losses = torch.zeros(num_output, device=self.memory1.latent.device)
+
 
         if fast_training:
             # extract key value in advance for fast trainig
@@ -125,13 +129,20 @@ class HMNet(BlockBase):
 
         for time_idx, (events, images, image_metas) in enumerate(zip(list_events, list_images, list_image_metas)):
             # forward one time step
-            out1, out2, out3, quant_loss = self._forward_one_step(events, image_metas, image_input=images, fast_training=fast_training)
+            out1, out2, out3, quant_loss_ = self._forward_one_step(events, image_metas, image_input=images, fast_training=fast_training)
 
             if out1 is None or out2 is None or out3 is None:
                 continue
 
             # gather outputs of annotated timmings for loss calculation
+            # NOTE we don't want to keep all outputs from all timesteps.
+            # Instead, you only want outputs at specific annotated timesteps, provided by gather_indices
             outputs1, outputs2, outputs3 = self._gather((outputs1, outputs2, outputs3), (out1, out2, out3), gather_indices, time_idx)
+            
+            # gather quant_loss
+            if not fast_training:
+                quant_loss = quant_loss_
+            quant_losses = self.gather_and_mean_quant_loss(quant_losses, quant_loss, gather_indices, time_idx)
 
         # detach memory states (required for TBPTT)
         if detach:
@@ -139,7 +150,7 @@ class HMNet(BlockBase):
             self.memory2.detach()
             self.memory3.detach()
 
-        return (outputs1, outputs2, outputs3), quant_loss
+        return (outputs1, outputs2, outputs3), quant_losses
 
     def inference(self, events, image_metas, image_input=None) -> Tensor:
         return self._forward_one_step(events, image_metas, image_input)
@@ -175,6 +186,32 @@ class HMNet(BlockBase):
             dst[dst_indices] = src[src_indices]
 
         return list_dst
+    
+    def gather_and_mean_quant_loss(self, quant_losses_buf, quant_loss_step, gather_indices, time_idx):
+        """
+        Gather quantization loss values for the current timestep into the global buffer.
+
+        Args:
+            quant_losses_buf (Tensor): Preallocated buffer of shape [num_output].
+            quant_loss_step (Tensor): Quantization loss for this timestep, shape [batch_size].
+            gather_indices (dict): Contains 'time' and 'batch' tensors of shape [num_output].
+            time_idx (int): Current timestep index.
+        """
+        time_indices = gather_indices['time']     # shape [num_output]
+        batch_indices = gather_indices['batch']   # shape [num_output]
+        destination = torch.arange(len(time_indices), device=batch_indices.device)
+
+        # select entries corresponding to current time step
+        mask = time_indices == time_idx
+        src_indices = batch_indices[mask]   # which batch to pick
+        dst_indices = destination[mask]     # where to write them
+        
+        # assign into the global buffer
+        if src_indices.numel() > 0:
+            indices = src_indices.item()
+            quant_losses_buf[dst_indices] = quant_loss_step[indices].mean()
+
+        return quant_losses_buf
 
     def termination(self):
         self.memory1.termination()

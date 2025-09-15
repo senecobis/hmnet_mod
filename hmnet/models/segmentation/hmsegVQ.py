@@ -50,7 +50,7 @@ class HMSegVQ(HMSeg):
 
         # Make sure all parameters are involved in loss calculation
         # e.g., parameters for event embedding will not be used when len(events)==0
-        loss = loss + sum([ 0. * params.sum() for params in self.parameters() ]) + quant_loss
+        loss = loss + sum([ 0. * params.sum() for params in self.parameters() ]) + quant_loss.sum()
 
         outputs = dict(loss=loss, log_vars=log_vars, num_samples=len(out_image_metas))
 

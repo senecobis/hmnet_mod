@@ -274,7 +274,7 @@ class LatentMemory(BlockBase):
             self.latent = self._forward_write_top_down(message_from_top)
 
         # bottom-up write, readout
-        quant_loss = 0
+        quant_loss = None
         if cycle_st:
             if self.image_write_enabled:
                 images, valid_batch = self.image_buffer.read()
@@ -411,6 +411,7 @@ class LatentMemory(BlockBase):
         return latent
 
     def _forward_event_write(self, inputs: SeqData, event_metas: list, fast_training: bool = False) -> SeqData:
+        quant_loss = None
         if fast_training:
             key, value, query_indices = inputs
             if len(key) == 0:
@@ -1174,6 +1175,8 @@ class VQEventEmbedding(EventEmbedding):
         return embeddings, indices, q_loss    # (L, C1+C2+C3), (L,), (L,)
 
     def _forward(self, dt, x, y, p, b):
+        # NOTE this forward is called ONLY by the forward_fast_train function
+    
         if len(dt) == 0:
             return None, None
 
@@ -1194,9 +1197,9 @@ class VQEventEmbedding(EventEmbedding):
             dt = dt / self.time_delta
 
         # get embeddings
-        xy_embedding, q_indices_xy, loss_xy = self.xy(x, y)
-        time_embedding, q_indices_t, loss_t = self.time(dt)
-        pol_embedding, q_indices_p, loss_p = self.pol(p)
+        xy_embedding, q_indices_xy, loss_xy = self.xy.forward_fast_train(x, y)
+        time_embedding, q_indices_t, loss_t = self.time.forward_fast_train(dt)
+        pol_embedding, q_indices_p, loss_p = self.pol.forward_fast_train(p)
 
         embeddings = torch.cat([xy_embedding, time_embedding, pol_embedding], dim=1)
 
@@ -1240,7 +1243,8 @@ class VQEventEmbedding(EventEmbedding):
         list_keys = key.split(split_sizes)
         list_values = value.split(split_sizes)
         list_ev_q = ev_q.split(split_sizes)
+        list_q_loss = q_loss.split(split_sizes)
 
         list_evdata = list(zip(list_keys, list_values, list_ev_q))
 
-        return list_evdata, q_loss
+        return list_evdata, list_q_loss

@@ -40,7 +40,7 @@ class VectorQuantizer(nn.Module):
 
         return quantized.view(*z.shape), encoding_indices.view(z.shape[0], -1), loss
     
-    def forward_batched(self, z: torch.Tensor):
+    def forward_fast_train(self, z: torch.Tensor):
         flat_z, quantized, encoding_indices = self.quantize_embeddings(z)
 
         # straight-through trick
@@ -48,7 +48,7 @@ class VectorQuantizer(nn.Module):
         sq_err_0 = F.mse_loss(quantized, flat_z.detach(), reduction="none")
         sq_err_1 = self.commitment_cost * F.mse_loss(quantized.detach(), flat_z, reduction="none")
 
-        loss = sq_err_0 + sq_err_1
+        loss = sq_err_0.mean(dim=1) + sq_err_1.mean(dim=1)
 
         return quantized.view(*z.shape), encoding_indices.view(z.shape[0], -1), loss
 
@@ -78,8 +78,13 @@ class Quantizer2D(nn.Module):
     def forward(self, xy: torch.Tensor):
         # xy: (B, 2) with pixel coordinates normalized to [-2, +2]
         z = self.encoder(xy)  # (B, embedding_dim)
-        # q, idx, loss = self.vq.forward_batched(z)
         q, idx, loss = self.vq(z)
+        return q, idx, loss
+
+    def forward_fast_train(self, xy: torch.Tensor):
+        # xy: (B, 2) with pixel coordinates normalized to [-2, +2]
+        z = self.encoder(xy)  # (B, embedding_dim)
+        q, idx, loss = self.vq.forward_fast_train(z)
         return q, idx, loss
 
 
@@ -109,6 +114,12 @@ class Quantizer1D(nn.Module):
         norm_t = (t.float() / (self.num_embeddings - 1)) * 2 - 1
         z = self.encoder(norm_t)  # (B, embedding_dim)
         q, idx, loss = self.vq(z)
+        return q, idx, loss
+    
+    def forward_fast_train(self, t: torch.Tensor):
+        norm_t = (t.float() / (self.num_embeddings - 1)) * 2 - 1
+        z = self.encoder(norm_t)  # (B, embedding_dim)
+        q, idx, loss = self.vq.forward_fast_train(z)
         return q, idx, loss
 
 

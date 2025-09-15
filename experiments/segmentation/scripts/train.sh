@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python scripts/train.py /home/pellerito/HMNet_pth_/experiments/segmentation/config/hmnet_B3_custom.py --amp --overwrite --wandb

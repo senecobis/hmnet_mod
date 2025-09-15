@@ -1383,7 +1383,7 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
             commitment_cost=commitment_cost,
         )
         
-    def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    def normalize(self, x: Tensor) -> Tensor:
         data = x.view(-1,1).float()
         if self.shift_normalize:
             data = data - self.x_size * 0.5
@@ -1391,7 +1391,16 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
             data = data / self.x_size
         if self.log_scale:
             data = self._to_log_scale(data)
+        return data
+        
+    def forward(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        data = self.normalize(x)
         embedding, idx, loss = self.embed(data)
+        return embedding, idx, loss
+
+    def forward_fast_train(self, x: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        data = self.normalize(x)
+        embedding, idx, loss = self.embed.forward_fast_train(data)
         return embedding, idx, loss
 
 
@@ -1423,8 +1432,8 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
             hidden_dim=hidden_dim,
             commitment_cost=commitment_cost,
         )
-
-    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:          
+    
+    def normalize(self, x: Tensor, y: Tensor) -> Tensor:
         data = torch.stack([x, y], dim=-1)
         if self.shift_normalize:
             data = data - torch.tensor([self.x_size, self.y_size], device=data.device).float() * 0.5
@@ -1432,6 +1441,14 @@ class VQPositionEmbedding2D(PositionEmbedding2D):
             data = data / torch.tensor([self.x_size, self.y_size], device=data.device).float()
         if self.log_scale:
             data = self._to_log_scale(data)
+        return data
 
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:          
+        data = self.normalize(x, y)
         embedding, idx, loss = self.embed(data)
+        return embedding, idx, loss
+    
+    def forward_fast_train(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:          
+        data = self.normalize(x, y)
+        embedding, idx, loss = self.embed.forward_fast_train(data)
         return embedding, idx, loss
