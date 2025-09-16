@@ -415,7 +415,7 @@ class LatentMemory(BlockBase):
         if fast_training:
             key, value, query_indices = inputs
             if len(key) == 0:
-                return self.latent
+                return self.latent, quant_loss # no events
             latent = SeqData(self.write_bottom_up.forward_fast_train(self.latent.data, key, value, query_indices), self.latent.meta)
         elif self.fast_inference:
             curr_time, duration = event_metas
