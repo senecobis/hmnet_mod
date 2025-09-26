@@ -1365,6 +1365,7 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
         x_size: int,
         embed_dim: int,
         hidden_dim: int = 64,
+        num_embeddings: int = 512,
         commitment_cost: float = 0.25,
         **kwargs
     ) -> None:
@@ -1372,12 +1373,12 @@ class VQPositionEmbedding1D(PositionEmbedding1D):
         
         self.x_size = x_size
         self.embed_dim = embed_dim
-        # self.num_embeddings = num_embeddings
+        self.num_embeddings = num_embeddings
         self.hidden_dim = hidden_dim
         self.commitment_cost = commitment_cost
 
         self.embed = Quantizer1D(
-            num_embeddings=x_size,  # set to x_size for unique encoding
+            num_embeddings=num_embeddings,
             embedding_dim=embed_dim,
             hidden_dim=hidden_dim,
             commitment_cost=commitment_cost,
