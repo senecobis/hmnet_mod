@@ -28,6 +28,10 @@
 # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import os
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
@@ -54,10 +58,10 @@ PREFIX = './debug/preds'
 #PREFIX = './debug/preds_img'
 # =============================
 
-import os
 import numpy as np
 import sys
 import copy
+from tqdm import tqdm
 from importlib import machinery
 from PIL import Image
 from functools import partial
@@ -130,7 +134,7 @@ def main(config):
                                              collate_fn=collate_keep_dict)
 
         results = {}
-        for i, data in enumerate(loader):
+        for i, data in tqdm(enumerate(loader)):
             events, images, image_metas = parse_event_data(data)
 
             if getattr(config, 'to_device_in_model', False) == False:

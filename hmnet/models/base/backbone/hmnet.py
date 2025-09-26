@@ -208,8 +208,7 @@ class HMNet(BlockBase):
         
         # assign into the global buffer
         if src_indices.numel() > 0:
-            indices = src_indices.item()
-            quant_losses_buf[dst_indices] = quant_loss_step[indices].mean()
+            quant_losses_buf[dst_indices] = quant_loss_step[src_indices]
 
         return quant_losses_buf
 

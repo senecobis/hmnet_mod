@@ -234,7 +234,7 @@ class TrainSettings(object):
         return train_dataset
 
     loader_param = dict(
-        batch_size  = 1,
+        batch_size  = 8,
         shuffle     = True,
         num_workers = 4,
         pin_memory  = True,
@@ -325,7 +325,7 @@ class TestSettings(object):
 
     # ======== prediction settings ========
     checkpoint      = 'checkpoint.pth.tar'
-    batch_size      = 1
+    batch_size      = 8
 
     to_device_in_model = True
 

@@ -1244,6 +1244,8 @@ class VQEventEmbedding(EventEmbedding):
         list_values = value.split(split_sizes)
         list_ev_q = ev_q.split(split_sizes)
         list_q_loss = q_loss.split(split_sizes)
+        # reduce the list of losses to mean value
+        list_q_loss = torch.stack([elem.mean() for elem in list_q_loss])
 
         list_evdata = list(zip(list_keys, list_values, list_ev_q))
 

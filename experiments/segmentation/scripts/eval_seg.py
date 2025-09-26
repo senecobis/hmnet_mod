@@ -43,6 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--gt_ext'   , type=str, default='png', help='')
     parser.add_argument('--pred_hdf5_path', type=str, help='')
     parser.add_argument('--gt_hdf5_path'  , type=str, help='')
+    parser.add_argument('--plot', action='store_true', help='Plot prediction and GT side by side')
     args = parser.parse_args()
 
 import numpy as np
@@ -50,6 +51,7 @@ import sys
 import os
 import glob
 import time
+import matplotlib.pyplot as plt
 
 from hmnet.utils.common import get_list, makedirs, ImageFiles
 
@@ -66,10 +68,32 @@ def get_loader(dpath, type, ext, hdf5_path):
         return ImageFiles.open_hdf5_files(dpath, hdf5_path)
     else:
         raise RuntimeError
+    
+def plot_pred_gt(pred, gt, dpath_out, i):
+    plt.clf()
+    if not os.path.exists(dpath_out):
+        os.makedirs(dpath_out)
+    # --- Plot and Save ---
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(pred)
+    axes[0].set_title("Prediction")
+    axes[0].axis("off")
+
+    axes[1].imshow(gt)
+    axes[1].set_title("Ground Truth")
+    axes[1].axis("off")
+
+    # Format filename with progressive number, fixed number of zeros (e.g., 0001, 0002, ...)
+    fname = f"{i:04d}.png"   # change 4 → 5 or 6 if you expect >9999 images
+    save_path = os.path.join(dpath_out, fname)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
 
 def eval_seg(dpath_pred, dpath_gt, evalid_to_gtid, ignore_gtid, margin, dpath_out=None,
                           pred_type='dir', pred_ext='png', pred_hdf5_path='',
-                          gt_type='dir', gt_ext='png', gt_hdf5_path=''):
+                          gt_type='dir', gt_ext='png', gt_hdf5_path='', plot=False):
 
     dpath_out = dpath_out or dpath_pred + '/logs/'
     makedirs(dpath_out)
@@ -118,6 +142,11 @@ def eval_seg(dpath_pred, dpath_gt, evalid_to_gtid, ignore_gtid, margin, dpath_ou
         ignore_mask = np.zeros_like(gt)
         for ign in ignore_gtid:
             ignore_mask = np.logical_or(ignore_mask, gt == ign)
+
+        # Plot prediction and GT side to side
+        if plot:
+            seq_name = os.path.splitext(os.path.basename(fpath_pred))[0]
+            plot_pred_gt(pred, gt, dpath_out + '/figs/' + f'{seq_name}', i)
 
         pred[ignore_mask] = -1
         gt[ignore_mask] = -1
@@ -185,7 +214,7 @@ if __name__ == '__main__':
 
     eval_seg(args.dpath_pred, args.dpath_gt, evalid_to_gtid, args.ignore_index, args.margin, dpath_out=args.dpath_out,
                           pred_type=args.pred_type, gt_type=args.gt_type, pred_ext=args.pred_ext, gt_ext=args.gt_ext,
-                          pred_hdf5_path=args.pred_hdf5_path, gt_hdf5_path=args.gt_hdf5_path)
+                          pred_hdf5_path=args.pred_hdf5_path, gt_hdf5_path=args.gt_hdf5_path, plot=args.plot)
 
 
 
