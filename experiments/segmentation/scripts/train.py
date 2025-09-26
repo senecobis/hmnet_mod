@@ -133,7 +133,7 @@ def main(local_rank, args, dist_settings=None):
         model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], **settings)
 
     # import wandb logging
-    if args.wandb:
+    if args.wandb and rank == 0:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         run = wandb.init(project="implicit-kernel", name=f"VQ_{timestamp}", config=config)
     else:

@@ -1135,8 +1135,8 @@ class VQEventEmbedding(EventEmbedding):
         super().__init__(input_size, latent_size, discrete_time, time_bins, duration, dynamic, dynamic_dim, out_dim)
         H, W, T = self.window_h, self.window_w, time_bins
 
-        self.xy   = VQPositionEmbedding2D(W, H, num_embeddings=1024, embed_dim=out_dim[0], hidden_dim=dynamic_dim[0], shift_normalize=True)
-        self.time = VQPositionEmbedding1D(T   , num_embeddings=1024, embed_dim=out_dim[1], hidden_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
+        self.xy   = VQPositionEmbedding2D(W, H, num_embeddings=512, embed_dim=out_dim[0], hidden_dim=dynamic_dim[0], shift_normalize=True)
+        self.time = VQPositionEmbedding1D(T   , num_embeddings=512, embed_dim=out_dim[1], hidden_dim=dynamic_dim[1], shift_normalize=True, scale_normalize=True)
         self.pol  = VQPositionEmbedding1D(2   , num_embeddings=4, embed_dim=out_dim[2], hidden_dim=dynamic_dim[2])
 
     def _forward_single(self, events: Tensor, curr_time: int, duration: int) -> Tuple[Tensor,Tensor]:
