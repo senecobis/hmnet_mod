@@ -30,7 +30,7 @@
 
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 if __name__ == '__main__':
     import argparse
@@ -59,6 +59,7 @@ PREFIX = './debug/preds'
 # =============================
 
 import numpy as np
+import re 
 import sys
 import copy
 from tqdm import tqdm
@@ -260,7 +261,31 @@ def get_config(args):
     name = args.config.split('/')[-1].replace('.py', '')
     dirname = get_dirname(args.data_list)
     config.dpath_work = f'./workspace/{name}'
-    config.dpath_out = f'./workspace/{name}/result/pred_{dirname}'
+
+    # ---- NEW: build results dir name from checkpoint ----
+    # Default tag if we can't detect a checkpoint number.
+    ckpt_tag = "default"
+    if config.random_init:
+        ckpt_tag = "random_init"
+    else:
+        # Prefer explicit --pretrained, otherwise fall back to config.checkpoint if present.
+        ckpt_source = args.pretrained
+        if ckpt_source is None and hasattr(config, "checkpoint"):
+            ckpt_source = config.checkpoint
+
+        if ckpt_source is not None:
+            base = os.path.basename(str(ckpt_source))
+            # Try to extract a number from names like "checkpoint_8.pth.tar"
+            m = re.search(r'checkpoint[_\-]?(\d+)', base)
+            if m:
+                ckpt_tag = m.group(1)
+            else:
+                # Use the stem (without extensions) if no number is found, e.g., "checkpoint_best"
+                ckpt_tag = os.path.splitext(os.path.splitext(base)[0])[0]
+
+    # Final path: ./workspace/<name>/results_checkpoint_<tag>/pred_<splitname>
+    config.dpath_out = f'./workspace/{name}/results_checkpoint_{ckpt_tag}/pred_{dirname}'
+    # -----------------------------------------------------
 
     return config
 
